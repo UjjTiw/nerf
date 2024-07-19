@@ -150,7 +150,6 @@ if __name__ == '__main__':
         max_epochs=hparams.num_epochs,
         callbacks=[checkpoint_callback],
         logger=logger,
-        weights_summary=None,
         gpus=hparams.num_gpus,
         accelerator='ddp' if hparams.num_gpus > 1 else None,
         num_sanity_val_steps=1,
