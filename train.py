@@ -147,14 +147,17 @@ if __name__ == '__main__':
     )
 
     trainer = pl.Trainer(
-        max_epochs=hparams.num_epochs,
-        callbacks=[checkpoint_callback],
-        logger=logger,
-        gpus=hparams.num_gpus,
-        accelerator='ddp' if hparams.num_gpus > 1 else None,
-        num_sanity_val_steps=1,
-        benchmark=True,
-        profiler=hparams.num_gpus == 1
-    )
+    max_epochs=hparams.num_epochs,
+    callbacks=[checkpoint_callback],
+    logger=logger,
+    accelerator='gpu' if hparams.num_gpus > 0 else 'cpu',
+    devices=hparams.num_gpus if hparams.num_gpus > 0 else 1,
+    num_sanity_val_steps=1,
+    benchmark=True,
+    profiler="simple" if hparams.num_gpus == 1 else None
+)
+
+
+
 
     trainer.fit(system, ckpt_path=hparams.ckpt_path if hparams.ckpt_path else None)
