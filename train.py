@@ -34,6 +34,8 @@ class NeRFSystem(pl.LightningModule):
         if hparams.N_importance > 0:
             self.nerf_fine = NeRF()
             self.models += [self.nerf_fine]
+        
+        self.validation_epoch_end_outputs = []
 
     def decode_batch(self, batch):
         rays = batch['rays']  # (B, 8)
@@ -99,6 +101,13 @@ class NeRFSystem(pl.LightningModule):
         self.log_dict(log)
         return loss
 
+    def on_validation_epoch_end(self):
+        mean_loss = torch.stack([x['val_loss'] for x in self.validation_epoch_end_outputs]).mean()
+        mean_psnr = torch.stack([x['val_psnr'] for x in self.validation_epoch_end_outputs]).mean()
+
+        self.log('val/loss', mean_loss)
+        self.log('val/psnr', mean_psnr)
+
     def validation_step(self, batch, batch_nb):
         rays, rgbs = self.decode_batch(batch)
         rays = rays.squeeze()  # (H*W, 3)
@@ -118,15 +127,8 @@ class NeRFSystem(pl.LightningModule):
             self.logger.experiment.add_images('val/GT_pred_depth', stack, self.global_step)
 
         log['val_psnr'] = psnr(results[f'rgb_{typ}'], rgbs)
-        self.log_dict(log)
+        self.validation_epoch_end_outputs.append(log)
         return log
-
-    def validation_epoch_end(self, outputs):
-        mean_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
-        mean_psnr = torch.stack([x['val_psnr'] for x in outputs]).mean()
-
-        self.log('val/loss', mean_loss)
-        self.log('val/psnr', mean_psnr)
 
 if __name__ == '__main__':
     hparams = get_opts()
