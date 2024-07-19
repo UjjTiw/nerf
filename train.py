@@ -148,7 +148,8 @@ if __name__ == '__main__':
     trainer = pl.Trainer(
         max_epochs=hparams.num_epochs,
         callbacks=[checkpoint_callback],
-        resume_from_checkpoint=hparams.ckpt_path,
+        # resume_from_checkpoint=hparams.ckpt_path,
+        ckpt_path=hparams.ckpt_path,
         logger=logger,
         weights_summary=None,
         gpus=hparams.num_gpus,
