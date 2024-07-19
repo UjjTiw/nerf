@@ -1,10 +1,8 @@
 import os
-import sys
 from collections import defaultdict
 
 import torch
 from torch.utils.data import DataLoader
-
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
@@ -26,8 +24,8 @@ class NeRFSystem(pl.LightningModule):
         self.loss = loss_dict[hparams.loss_type]()
         
         # Embeddings
-        self.embedding_xyz = Embedding(3, 10) # 10 is the default number
-        self.embedding_dir = Embedding(3, 4) # 4 is the default number
+        self.embedding_xyz = Embedding(3, 10)  # 10 is the default number
+        self.embedding_dir = Embedding(3, 4)   # 4 is the default number
         self.embeddings = [self.embedding_xyz, self.embedding_dir]
 
         # Models
@@ -98,7 +96,8 @@ class NeRFSystem(pl.LightningModule):
             psnr_ = psnr(results[f'rgb_{typ}'], rgbs)
             log['train/psnr'] = psnr_
 
-        return {'loss': loss, 'log': log, 'progress_bar': {'train_psnr': psnr_}}
+        self.log_dict(log)
+        return loss
 
     def validation_step(self, batch, batch_nb):
         rays, rgbs = self.decode_batch(batch)
@@ -119,13 +118,15 @@ class NeRFSystem(pl.LightningModule):
             self.logger.experiment.add_images('val/GT_pred_depth', stack, self.global_step)
 
         log['val_psnr'] = psnr(results[f'rgb_{typ}'], rgbs)
+        self.log_dict(log)
         return log
 
     def validation_epoch_end(self, outputs):
         mean_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
         mean_psnr = torch.stack([x['val_psnr'] for x in outputs]).mean()
 
-        return {'log': {'val/loss': mean_loss, 'val/psnr': mean_psnr}, 'progress_bar': {'val_loss': mean_loss, 'val_psnr': mean_psnr}}
+        self.log('val/loss', mean_loss)
+        self.log('val/psnr', mean_psnr)
 
 if __name__ == '__main__':
     hparams = get_opts()
@@ -148,8 +149,6 @@ if __name__ == '__main__':
     trainer = pl.Trainer(
         max_epochs=hparams.num_epochs,
         callbacks=[checkpoint_callback],
-        # resume_from_checkpoint=hparams.ckpt_path,
-        ckpt_path=hparams.ckpt_path,
         logger=logger,
         weights_summary=None,
         gpus=hparams.num_gpus,
@@ -159,4 +158,4 @@ if __name__ == '__main__':
         profiler=hparams.num_gpus == 1
     )
 
-    trainer.fit(system)
+    trainer.fit(system, ckpt_path=hparams.ckpt_path if hparams.ckpt_path else None)
