@@ -19,65 +19,37 @@ torch.backends.cudnn.benchmark = True
 
 def get_opts():
     parser = ArgumentParser()
-    parser.add_argument('--root_dir', type=str,
-                        default='/home/ubuntu/data/nerf_example_data/nerf_synthetic/lego',
+    parser.add_argument('--root_dir', type=str, default='/home/ubuntu/data/nerf_example_data/nerf_synthetic/lego',
                         help='root directory of dataset')
     parser.add_argument('--dataset_name', type=str, default='blender',
-                        choices=['blender', 'llff'],
-                        help='which dataset to validate')
+                        choices=['blender', 'llff'], help='which dataset to validate')
     parser.add_argument('--scene_name', type=str, default='test',
                         help='scene name, used as output folder name')
-    parser.add_argument('--split', type=str, default='test',
-                        help='test or test_train')
+    parser.add_argument('--split', type=str, default='test', help='test or test_train')
     parser.add_argument('--img_wh', nargs="+", type=int, default=[800, 800],
                         help='resolution (img_w, img_h) of the image')
     parser.add_argument('--spheric_poses', default=False, action="store_true",
                         help='whether images are taken in spheric poses (for llff)')
-
-    parser.add_argument('--N_samples', type=int, default=64,
-                        help='number of coarse samples')
-    parser.add_argument('--N_importance', type=int, default=128,
-                        help='number of additional fine samples')
-    parser.add_argument('--use_disp', default=False, action="store_true",
-                        help='use disparity depth sampling')
-    parser.add_argument('--chunk', type=int, default=32*1024*4,
-                        help='chunk size to split the input to avoid OOM')
-
-    parser.add_argument('--ckpt_path', type=str, required=True,
-                        help='pretrained checkpoint path to load')
-
-    parser.add_argument('--save_depth', default=False, action="store_true",
-                        help='whether to save depth prediction')
-    parser.add_argument('--depth_format', type=str, default='pfm',
-                        choices=['pfm', 'bytes'],
-                        help='which format to save')
+    parser.add_argument('--N_samples', type=int, default=64, help='number of coarse samples')
+    parser.add_argument('--N_importance', type=int, default=128, help='number of additional fine samples')
+    parser.add_argument('--use_disp', default=False, action="store_true", help='use disparity depth sampling')
+    parser.add_argument('--chunk', type=int, default=32*1024*4, help='chunk size to split the input to avoid OOM')
+    parser.add_argument('--ckpt_path', type=str, required=True, help='pretrained checkpoint path to load')
+    parser.add_argument('--save_depth', default=False, action="store_true", help='whether to save depth prediction')
+    parser.add_argument('--depth_format', type=str, default='pfm', choices=['pfm', 'bytes'], help='which format to save')
 
     return parser.parse_args()
 
-
 @torch.no_grad()
-def batched_inference(models, embeddings,
-                      rays, N_samples, N_importance, use_disp,
-                      chunk,
-                      white_back):
+def batched_inference(models, embeddings, rays, N_samples, N_importance, use_disp, chunk, white_back):
     """Do batched inference on rays using chunk."""
     B = rays.shape[0]
-    chunk = 1024*32
+    chunk = 1024 * 32
     results = defaultdict(list)
+    
+    # Process rays in chunks to avoid OOM
     for i in range(0, B, chunk):
-        rendered_ray_chunks = \
-            render_rays(models,
-                        embeddings,
-                        rays[i:i+chunk],
-                        N_samples,
-                        use_disp,
-                        0,
-                        0,
-                        N_importance,
-                        chunk,
-                        dataset.white_back,
-                        test_time=True)
-
+        rendered_ray_chunks = render_rays(models, embeddings, rays[i:i + chunk], N_samples, use_disp, 0, 0, N_importance, chunk, white_back, test_time=True)
         for k, v in rendered_ray_chunks.items():
             results[k] += [v]
 
@@ -85,18 +57,17 @@ def batched_inference(models, embeddings,
         results[k] = torch.cat(v, 0) if v else torch.tensor([]).cuda()
     return results
 
-
 if __name__ == "__main__":
     args = get_opts()
     w, h = args.img_wh
 
-    kwargs = {'root_dir': args.root_dir,
-              'split': args.split,
-              'img_wh': tuple(args.img_wh)}
+    # Dataset configuration
+    kwargs = {'root_dir': args.root_dir, 'split': args.split, 'img_wh': tuple(args.img_wh)}
     if args.dataset_name == 'llff':
         kwargs['spheric_poses'] = args.spheric_poses
     dataset = dataset_dict[args.dataset_name](**kwargs)
 
+    # Model and embedding initialization
     embedding_xyz = Embedding(3, 10)
     embedding_dir = Embedding(3, 4)
     nerf_coarse = NeRF()
@@ -117,55 +88,38 @@ if __name__ == "__main__":
     for i in tqdm(range(len(dataset))):
         sample = dataset[i]
         rays = sample['rays'].cuda()
-        results = batched_inference(models, embeddings, rays,
-                                    args.N_samples, args.N_importance, args.use_disp,
-                                    args.chunk,
-                                    dataset.white_back)
+        results = batched_inference(models, embeddings, rays, args.N_samples, args.N_importance, args.use_disp, args.chunk, dataset.white_back)
 
-        # Check if results['rgb_fine'] is populated
-        if 'rgb_fine' in results:
-            print(f'Frame {i}: rgb_fine length = {len(results["rgb_fine"])}')
+        if 'rgb_fine' in results and results['rgb_fine'].numel() > 0:
+            img_pred = results['rgb_fine'].view(h, w, 3).cpu().numpy()
         else:
-            print(f'Frame {i}: rgb_fine not found in results')
+            print(f"Frame {i}: rgb_fine not found or is empty in results")
+            continue
 
-        if isinstance(results['rgb_fine'], list) and len(results['rgb_fine']) > 0:
-            rgb_fine = torch.cat(results['rgb_fine'], 0)
-        else:
-            print(f'Frame {i}: No data in rgb_fine')
-            continue
-        
-        if rgb_fine.numel() > 0:
-            img_pred = rgb_fine.view(h, w, 3).cpu().numpy()
-        else:
-            print(f'Frame {i}: No data in rgb_fine after concatenation')
-            continue
-        
-        if args.save_depth:
-            if 'depth_fine' in results and isinstance(results['depth_fine'], list) and len(results['depth_fine']) > 0:
-                depth_fine = torch.cat(results['depth_fine'], 0)
-                if depth_fine.numel() > 0:
-                    depth_pred = depth_fine.view(h, w).cpu().numpy()
-                    depth_pred = np.nan_to_num(depth_pred)
-                    if args.depth_format == 'pfm':
-                        save_pfm(os.path.join(dir_name, f'depth_{i:03d}.pfm'), depth_pred)
-                    else:
-                        with open(f'depth_{i:03d}', 'wb') as f:
-                            f.write(depth_pred.tobytes())
-                else:
-                    print(f'Frame {i}: No data in depth_fine after concatenation')
+        if args.save_depth and 'depth_fine' in results and results['depth_fine'].numel() > 0:
+            depth_pred = results['depth_fine'].view(h, w).cpu().numpy()
+            depth_pred = np.nan_to_num(depth_pred)
+            if args.depth_format == 'pfm':
+                save_pfm(os.path.join(dir_name, f'depth_{i:03d}.pfm'), depth_pred)
             else:
-                print(f'Frame {i}: No data in depth_fine')
+                with open(f'depth_{i:03d}', 'wb') as f:
+                    f.write(depth_pred.tobytes())
+        elif args.save_depth:
+            print(f"Frame {i}: depth_fine not found or is empty in results")
 
         img_pred_ = (img_pred * 255).astype(np.uint8)
-        imgs += [img_pred_]
+        imgs.append(img_pred_)
         imageio.imwrite(os.path.join(dir_name, f'{i:03d}.png'), img_pred_)
 
         if 'rgbs' in sample:
             rgbs = sample['rgbs']
             img_gt = rgbs.view(h, w, 3)
-            psnrs += [metrics.psnr(img_gt, img_pred).item()]
+            psnrs.append(metrics.psnr(img_gt, img_pred).item())
 
-    imageio.mimsave(os.path.join(dir_name, f'{args.scene_name}.gif'), imgs, fps=30)
+    if imgs:
+        imageio.mimsave(os.path.join(dir_name, f'{args.scene_name}.gif'), imgs, fps=30)
+    else:
+        print("No images to create GIF")
 
     if psnrs:
         mean_psnr = np.mean(psnrs)
