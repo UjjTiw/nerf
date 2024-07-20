@@ -36,7 +36,7 @@ def get_opts():
 
     parser.add_argument('--N_samples', type=int, default=64,
                         help='number of coarse samples')
-    parser.add_argument('--N_importance', type=int, default= 128,
+    parser.add_argument('--N_importance', type=int, default=128,
                         help='number of additional fine samples')
     parser.add_argument('--use_disp', default=False, action="store_true",
                         help='use disparity depth sampling')
@@ -122,10 +122,13 @@ if __name__ == "__main__":
                                     args.chunk,
                                     dataset.white_back)
 
-        img_pred = results['rgb_fine'].view(h, w, 3).cpu().numpy()
+        # Convert the list to tensor before view
+        rgb_fine = torch.cat(results['rgb_fine'], 0) if isinstance(results['rgb_fine'], list) else results['rgb_fine']
+        img_pred = rgb_fine.view(h, w, 3).cpu().numpy()
         
         if args.save_depth:
-            depth_pred = results['depth_fine'].view(h, w).cpu().numpy()
+            depth_fine = torch.cat(results['depth_fine'], 0) if isinstance(results['depth_fine'], list) else results['depth_fine']
+            depth_pred = depth_fine.view(h, w).cpu().numpy()
             depth_pred = np.nan_to_num(depth_pred)
             if args.depth_format == 'pfm':
                 save_pfm(os.path.join(dir_name, f'depth_{i:03d}.pfm'), depth_pred)
