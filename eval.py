@@ -82,7 +82,7 @@ def batched_inference(models, embeddings,
             results[k] += [v]
 
     for k, v in results.items():
-        results[k] = torch.cat(v, 0)
+        results[k] = torch.cat(v, 0) if v else torch.tensor([]).cuda()
     return results
 
 
@@ -122,21 +122,33 @@ if __name__ == "__main__":
                                     args.chunk,
                                     dataset.white_back)
 
-        # Convert the list to tensor before view
-        rgb_fine = torch.cat(results['rgb_fine'], 0) if isinstance(results['rgb_fine'], list) else results['rgb_fine']
-        img_pred = rgb_fine.view(h, w, 3).cpu().numpy()
+        # Debug print to check if results['rgb_fine'] is populated
+        if 'rgb_fine' in results:
+            print(f'Frame {i}: rgb_fine length = {len(results["rgb_fine"])}')
+        else:
+            print(f'Frame {i}: rgb_fine not found in results')
+
+        rgb_fine = results['rgb_fine']
+        if rgb_fine.numel() > 0:
+            img_pred = rgb_fine.view(h, w, 3).cpu().numpy()
+        else:
+            print(f'Frame {i}: No data in rgb_fine')
+            continue
         
         if args.save_depth:
-            depth_fine = torch.cat(results['depth_fine'], 0) if isinstance(results['depth_fine'], list) else results['depth_fine']
-            depth_pred = depth_fine.view(h, w).cpu().numpy()
-            depth_pred = np.nan_to_num(depth_pred)
-            if args.depth_format == 'pfm':
-                save_pfm(os.path.join(dir_name, f'depth_{i:03d}.pfm'), depth_pred)
+            depth_fine = results['depth_fine']
+            if depth_fine.numel() > 0:
+                depth_pred = depth_fine.view(h, w).cpu().numpy()
+                depth_pred = np.nan_to_num(depth_pred)
+                if args.depth_format == 'pfm':
+                    save_pfm(os.path.join(dir_name, f'depth_{i:03d}.pfm'), depth_pred)
+                else:
+                    with open(f'depth_{i:03d}', 'wb') as f:
+                        f.write(depth_pred.tobytes())
             else:
-                with open(f'depth_{i:03d}', 'wb') as f:
-                    f.write(depth_pred.tobytes())
+                print(f'Frame {i}: No data in depth_fine')
 
-        img_pred_ = (img_pred*255).astype(np.uint8)
+        img_pred_ = (img_pred * 255).astype(np.uint8)
         imgs += [img_pred_]
         imageio.imwrite(os.path.join(dir_name, f'{i:03d}.png'), img_pred_)
 
@@ -144,9 +156,9 @@ if __name__ == "__main__":
             rgbs = sample['rgbs']
             img_gt = rgbs.view(h, w, 3)
             psnrs += [metrics.psnr(img_gt, img_pred).item()]
-        
+
     imageio.mimsave(os.path.join(dir_name, f'{args.scene_name}.gif'), imgs, fps=30)
-    
+
     if psnrs:
         mean_psnr = np.mean(psnrs)
         print(f'Mean PSNR : {mean_psnr:.2f}')
