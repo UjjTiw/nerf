@@ -122,29 +122,37 @@ if __name__ == "__main__":
                                     args.chunk,
                                     dataset.white_back)
 
-        # Debug print to check if results['rgb_fine'] is populated
+        # Check if results['rgb_fine'] is populated
         if 'rgb_fine' in results:
             print(f'Frame {i}: rgb_fine length = {len(results["rgb_fine"])}')
         else:
             print(f'Frame {i}: rgb_fine not found in results')
 
-        rgb_fine = results['rgb_fine']
-        if rgb_fine.numel() > 0:
-            img_pred = rgb_fine.view(h, w, 3).cpu().numpy()
+        if isinstance(results['rgb_fine'], list) and len(results['rgb_fine']) > 0:
+            rgb_fine = torch.cat(results['rgb_fine'], 0)
         else:
             print(f'Frame {i}: No data in rgb_fine')
             continue
         
+        if rgb_fine.numel() > 0:
+            img_pred = rgb_fine.view(h, w, 3).cpu().numpy()
+        else:
+            print(f'Frame {i}: No data in rgb_fine after concatenation')
+            continue
+        
         if args.save_depth:
-            depth_fine = results['depth_fine']
-            if depth_fine.numel() > 0:
-                depth_pred = depth_fine.view(h, w).cpu().numpy()
-                depth_pred = np.nan_to_num(depth_pred)
-                if args.depth_format == 'pfm':
-                    save_pfm(os.path.join(dir_name, f'depth_{i:03d}.pfm'), depth_pred)
+            if 'depth_fine' in results and isinstance(results['depth_fine'], list) and len(results['depth_fine']) > 0:
+                depth_fine = torch.cat(results['depth_fine'], 0)
+                if depth_fine.numel() > 0:
+                    depth_pred = depth_fine.view(h, w).cpu().numpy()
+                    depth_pred = np.nan_to_num(depth_pred)
+                    if args.depth_format == 'pfm':
+                        save_pfm(os.path.join(dir_name, f'depth_{i:03d}.pfm'), depth_pred)
+                    else:
+                        with open(f'depth_{i:03d}', 'wb') as f:
+                            f.write(depth_pred.tobytes())
                 else:
-                    with open(f'depth_{i:03d}', 'wb') as f:
-                        f.write(depth_pred.tobytes())
+                    print(f'Frame {i}: No data in depth_fine after concatenation')
             else:
                 print(f'Frame {i}: No data in depth_fine')
 
