@@ -65,8 +65,16 @@ def extract_model_state_dict(ckpt_path, model_name='model', prefixes_to_ignore=[
 
     return checkpoint_
 
-def load_ckpt(model, ckpt_path, model_name='model', prefixes_to_ignore=[]):
-    model_dict = model.state_dict()
-    checkpoint_ = extract_model_state_dict(ckpt_path, model_name, prefixes_to_ignore)
-    model_dict.update(checkpoint_)
-    model.load_state_dict(model_dict)
+def load_ckpt(model, ckpt_path, model_name=''):
+    checkpoint = torch.load(ckpt_path)
+    if model_name:
+        model_dict = checkpoint[model_name]
+    else:
+        model_dict = checkpoint
+    try:
+        model.load_state_dict(model_dict, strict=False)
+        print(f'Loaded {model_name} checkpoint from {ckpt_path}')
+    except RuntimeError as e:
+        print(f'Error loading state_dict for {model_name}: {e}')
+        print(f'Loading with strict=False...')
+        model.load_state_dict(model_dict, strict=False)
